@@ -11,7 +11,6 @@ import Recipes from '../pages/Recipes';
 import DocumentPage from '../pages/DocumentPage';
 
 // 你可以把这个默认文档 id 换成自己的
-const DEFAULT_DOC_ID = 'doc-intro';
 
 const routes: RouteObject[] = [
   {
@@ -23,12 +22,9 @@ const routes: RouteObject[] = [
       { path: 'recipes', element: <Recipes /> },
 
       // 新：文档路由（可直达 /docs/:id）
-      { path: 'docs', element: <Navigate to={`docs/${DEFAULT_DOC_ID}`} replace /> },
+      { path: 'docs', element: <DocumentPage /> },
       { path: 'docs/:id', element: <DocumentPage /> },
-
-      // 兼容老路径：/document -> /docs/:id
-      { path: 'document', element: <Navigate to={`../docs/${DEFAULT_DOC_ID}`} replace /> },
-
+      
       // 嵌套路由内的 404
       { path: '*', element: <NotFound /> },
 

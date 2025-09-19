@@ -25,7 +25,9 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
           </span>
         </div>
 
-        <p className="line-clamp-2 text-sm text-slate-600">{recipe.description}</p>
+        <p className="line-clamp-2 text-sm text-slate-600">
+          {recipe.description}
+        </p>
 
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <ClockIcon className="h-4 w-4" />
@@ -33,7 +35,7 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
         </div>
 
         <div className="flex flex-wrap gap-2 pt-1">
-          {recipe.tags.map(t => (
+          {recipe.tags.map((t) => (
             <span
               key={t}
               className="rounded-full bg-slate-50 px-2 py-0.5 text-xs text-slate-600"
@@ -48,5 +50,5 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
         </button>
       </div>
     </div>
-  )
+  );
 }

@@ -58,7 +58,7 @@ export default function AppLayout() {
               Recipes
             </NavLink>
             <NavLink
-              to="/document"
+              to="/docs"
               className={({ isActive }) =>
                 isActive
                   ? 'text-blue-400 font-semibold'

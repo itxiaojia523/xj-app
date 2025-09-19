@@ -21,18 +21,18 @@ api.interceptors.request.use(
   }
 );
 
-// 3. 响应拦截器
-api.interceptors.response.use(
-  (response) => {
-    return response.data; // 统一返回 data
-  },
-  (error) => {
-    if (error.response?.status === 401) {
-      console.error('未授权，请重新登录');
-      // 这里可以跳转到登录页
-    }
-    return Promise.reject(error);
-  }
-);
+// // 3. 响应拦截器
+// api.interceptors.response.use(
+//   (response) => {
+//     return response.data; // 统一返回 data
+//   },
+//   (error) => {
+//     if (error.response?.status === 401) {
+//       console.error('未授权，请重新登录');
+//       // 这里可以跳转到登录页
+//     }
+//     return Promise.reject(error);
+//   }
+// );
 
 export default api;
