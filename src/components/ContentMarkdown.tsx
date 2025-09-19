@@ -66,6 +66,12 @@ export default function ContentMarkdown() {
     await updateDoc(next); // 🔥 同步落库（也可做成防抖）
   };
 
+  if (!id)
+    return (
+      <>
+        <h1>请新建文档</h1>
+      </>
+    );
   return (
     <section className="flex-1 p-4 flex flex-col gap-3" data-color-mode="light">
       <div className="flex items-center justify-between">

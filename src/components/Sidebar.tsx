@@ -7,7 +7,7 @@ import {
 } from "@hello-pangea/dnd";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { createDoc, getDocs, getDocsSideBar } from "../api/doc";
+import { createDoc, deleteDoc, getDocs, getDocsSideBar } from "../api/doc";
 import { DocsSideBarItem } from "../type";
 import { v4 as uuidv4 } from "uuid";
 
@@ -80,9 +80,19 @@ export default function Sidebar() {
       content: "",
       sortIndex: 9999,
     });
-
+    setOrderedItems((prev) => [
+      { id: newId, title: "无标题", sortIndex: 9999 },
+      ...prev,
+    ]);
     navigate(`/docs/${newId}`, { replace: true });
   };
+
+  const onDelete = async (id: string) => {
+    const filtered = orderedItems.filter((it) => it.id !== id);
+    setOrderedItems(filtered);
+    await deleteDoc(id);
+  };
+
   return (
     <aside className="w-60 border-r p-4">
       <div className="flex items-center justify-between mb-3">
@@ -110,10 +120,11 @@ export default function Sidebar() {
                       ref={provided.innerRef}
                       {...provided.draggableProps}
                       {...provided.dragHandleProps}
-                      className={`rounded transition ${
+                      className={`rounded transition flex items-center justify-between ${
                         snapshot.isDragging ? "bg-gray-200 shadow-md" : ""
                       }`}
                     >
+                      {/* 左侧标题 */}
                       <NavLink
                         to={`/docs/${it.id}`}
                         className={({ isActive }) =>
@@ -124,6 +135,18 @@ export default function Sidebar() {
                       >
                         {it.title}
                       </NavLink>
+
+                      {/* 右侧删除按钮 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation(); // 阻止事件冒泡，防止触发 NavLink
+                          e.preventDefault(); // 阻止 NavLink 导航
+                          onDelete(it.id); // 调用传入的删除函数
+                        }}
+                        className="ml-2 px-2 py-1 text-sm text-red-500 hover:text-red-700 rounded hover:bg-red-100 transition"
+                      >
+                        删除
+                      </button>
                     </li>
                   )}
                 </Draggable>
