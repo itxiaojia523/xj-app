@@ -1,72 +1,139 @@
 // src/components/ContentMarkdown.tsx
-import { use, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import MarkdownEditor from "@uiw/react-markdown-editor";
 import Markdown from "@uiw/react-markdown-preview";
 import { getDocDetail, updateDoc } from "../api/doc";
-import { Navigate, useParams } from "react-router-dom";
-import { DocItem } from "../type";
+import { useParams } from "react-router-dom";
 import EditableTitle from "./EditableTitle";
+import type { DocItem } from "../type";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
-// {
-//   storageKey, title, initial = '# 双击正文开始编辑', height = 520,
-// }: { storageKey: string; title: string; initial?: string; height?: number }
 export default function ContentMarkdown() {
-  // const [value, setValue] = useState('');
-  // const [lastSaved, setLastSaved] = useState('');
-  const [isEditing, setIsEditing] = useState(false);
-  const [docItem, setDocItem] = useState<DocItem>({
-    id: "",
-    title: "",
-    content: "",
-    sortIndex: 9999,
-  });
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!id) return;
-      const res = await getDocDetail(id);
-      setDocItem(res);
-    };
-    fetchData();
-  }, [id]);
+  // 1) 读取详情：只在有 id 时启用；用 placeholderData 避免 undefined
+  const {
+    data: docItem = {
+      id: id ?? "",
+      title: "",
+      content: "",
+      sortIndex: 9999,
+    } as DocItem,
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: ["doc", id],
+    queryFn: () => getDocDetail(id as string),
+    enabled: !!id,
+    placeholderData: {
+      id: id ?? "",
+      title: "",
+      content: "",
+      sortIndex: 9999,
+    } as DocItem,
+  });
 
-  // useEffect(() => {
-  //   const saved = localStorage.getItem(storageKey);
-  //   const text = saved ?? initial;
-  //   setValue(text);
-  //   setLastSaved(text);
-  //   setIsEditing(false);
-  // }, [storageKey, initial]);
+  // 本地编辑态（只控制是否显示编辑器）
+  const [isEditing, setIsEditing] = useState(false);
 
-  // const doSave = useCallback((next?: string) => {
-  //   const content = next ?? value;
-  //   localStorage.setItem(storageKey, content);
-  //   setLastSaved(content);
-  // }, [storageKey, value]);
+  // 2) 保存正文：乐观更新 + 失败回滚 + 失效刷新（正文与侧栏都刷新）
+  const saveContentMutation = useMutation({
+    mutationFn: (next: DocItem) => updateDoc(next),
+    onMutate: async (next) => {
+      await queryClient.cancelQueries({ queryKey: ["doc", next.id] });
+      const prevDoc = queryClient.getQueryData<DocItem>(["doc", next.id]);
+      // 乐观更新正文缓存
+      queryClient.setQueryData<DocItem>(["doc", next.id], (old) =>
+        old ? { ...old, content: next.content } : next
+      );
+      // 侧栏标题可能不变，这里不更新；若需要也可同步更新 docsSidebar 的缓存
+      return { prevDoc };
+    },
+    onError: (_err, next, ctx) => {
+      if (ctx?.prevDoc) {
+        queryClient.setQueryData(["doc", next.id], ctx.prevDoc);
+      }
+    },
+    onSettled: (_data, _err, variables) => {
+      // 以后端为准刷新：正文与侧栏
+      queryClient.invalidateQueries({ queryKey: ["doc", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["docsSidebar"] });
+    },
+  });
 
-  // useEffect(() => {
-  //   if (!isEditing) return;
-  //   const onKey = (e: KeyboardEvent) => {
-  //     const isSave = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
-  //     const isEsc = e.key === 'Escape';
-  //     if (isSave) { e.preventDefault(); doSave(); setIsEditing(false); }
-  //     if (isEsc)  { e.preventDefault(); setValue(lastSaved); setIsEditing(false); }
-  //   };
-  //   window.addEventListener('keydown', onKey);
-  //   return () => window.removeEventListener('keydown', onKey);
-  // }, [isEditing, doSave, lastSaved]);
-  const handleSave = async () => {
-    await updateDoc(docItem);
+  // 3) 保存标题：防抖 + 乐观更新 + 失效刷新（侧栏会立即看到变化）
+  const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTitleMutation = useMutation({
+    mutationFn: (next: DocItem) => updateDoc(next),
+    onMutate: async (next) => {
+      await queryClient.cancelQueries({ queryKey: ["doc", next.id] });
+      const prevDoc = queryClient.getQueryData<DocItem>(["doc", next.id]);
+      // 乐观更新正文缓存中的标题
+      queryClient.setQueryData<DocItem>(["doc", next.id], (old) =>
+        old ? { ...old, title: next.title } : next
+      );
+      // 同步乐观更新侧栏列表（如果缓存已存在）
+      const prevList = queryClient.getQueryData<DocItem[]>(["docsSidebar"]);
+      if (prevList) {
+        queryClient.setQueryData<DocItem[]>(["docsSidebar"], (old) =>
+          (old ?? []).map((d) =>
+            d.id === next.id ? { ...d, title: next.title } : d
+          )
+        );
+      }
+      return { prevDoc, prevList };
+    },
+    onError: (_err, next, ctx) => {
+      if (ctx?.prevDoc) queryClient.setQueryData(["doc", next.id], ctx.prevDoc);
+      if (ctx?.prevList)
+        queryClient.setQueryData(["docsSidebar"], ctx.prevList);
+    },
+    onSettled: (_data, _err, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["doc", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["docsSidebar"] });
+    },
+  });
+
+  const handleSave = useCallback(() => {
+    if (!docItem?.id) return;
+    saveContentMutation.mutate(docItem);
     setIsEditing(false);
-  };
-  const handleSaveTitle = async (newTitle: string) => {
-    const next = { ...docItem, title: newTitle };
-    setDocItem(next);
-    await updateDoc(next); // 🔥 同步落库（也可做成防抖）
-  };
+  }, [docItem, saveContentMutation]);
 
-  if (!id)
+  // EditableTitle 的保存回调（已防抖）
+  const handleSaveTitle = useCallback(
+    (newTitle: string) => {
+      if (!docItem?.id) return;
+      const next: DocItem = { ...docItem, title: newTitle };
+      // 防抖：用户快速输入时合并请求
+      if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current);
+      titleDebounceRef.current = setTimeout(() => {
+        saveTitleMutation.mutate(next);
+      }, 300);
+      // 立即做本地“看得见”的更新（也能只靠 onMutate 乐观更新）
+      queryClient.setQueryData<DocItem>(["doc", next.id], next);
+    },
+    [docItem, queryClient, saveTitleMutation]
+  );
+
+  // 键盘快捷键：Ctrl/Cmd+S 保存，Esc 取消编辑
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "s" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSave();
+      } else if (e.key === "Escape") {
+        setIsEditing(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleSave]);
+
+  // 无 id 的空白页
+  if (!id) {
     return (
       <section
         className="flex-1 p-4 flex flex-col gap-3"
@@ -82,9 +149,27 @@ export default function ContentMarkdown() {
             </p>
           </div>
         </div>
-        <div className="flex items-center justify-between"></div>
       </section>
     );
+  }
+
+  if (isLoading) {
+    return (
+      <section className="flex-1 p-4" data-color-mode="light">
+        <div className="text-gray-500">加载中...</div>
+      </section>
+    );
+  }
+
+  if (isError) {
+    return (
+      <section className="flex-1 p-4" data-color-mode="light">
+        <div className="text-red-500">
+          加载失败：{(error as Error)?.message}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="flex-1 p-4 flex flex-col gap-3" data-color-mode="light">
@@ -95,15 +180,15 @@ export default function ContentMarkdown() {
             <button
               className="px-3 py-1 rounded bg-blue-600 text-white"
               onClick={handleSave}
+              disabled={saveContentMutation.isPending}
             >
-              保存（Ctrl/Cmd+S）
+              {saveContentMutation.isPending
+                ? "保存中..."
+                : "保存（Ctrl/Cmd+S）"}
             </button>
             <button
               className="px-3 py-1 rounded border"
-              onClick={() => {
-                // setValue(lastSaved);
-                setIsEditing(false);
-              }}
+              onClick={() => setIsEditing(false)}
             >
               取消（Esc）
             </button>
@@ -116,8 +201,13 @@ export default function ContentMarkdown() {
       {isEditing ? (
         <MarkdownEditor
           value={docItem.content}
-          height={520 + "px"}
-          onChange={(v) => setDocItem({ ...docItem, content: v })}
+          height="520px"
+          onChange={(v) =>
+            queryClient.setQueryData<DocItem>(["doc", docItem.id], {
+              ...docItem,
+              content: v,
+            })
+          }
         />
       ) : (
         <div
