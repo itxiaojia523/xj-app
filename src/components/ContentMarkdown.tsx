@@ -68,10 +68,24 @@ export default function ContentMarkdown() {
 
   if (!id)
     return (
-      <>
-        <h1>请新建文档</h1>
-      </>
+      <section
+        className="flex-1 p-4 flex flex-col gap-3"
+        data-color-mode="light"
+      >
+        <div className="flex flex-col items-center justify-center h-[calc(100vh-100px)] text-center">
+          <div className="bg-white shadow-lg rounded-2xl p-8 max-w-md">
+            <h1 className="text-2xl font-bold text-gray-800 mb-4">
+              请新建文档
+            </h1>
+            <p className="text-gray-600 mb-6">
+              还没有选择或创建文档，请先新建一个文档以开始编辑。
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between"></div>
+      </section>
     );
+
   return (
     <section className="flex-1 p-4 flex flex-col gap-3" data-color-mode="light">
       <div className="flex items-center justify-between">

@@ -1,97 +1,110 @@
 // src/components/Sidebar.tsx
-import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-  DropResult,
-} from "@hello-pangea/dnd";
 import { NavLink, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { createDoc, deleteDoc, getDocs, getDocsSideBar } from "../api/doc";
-import { DocsSideBarItem } from "../type";
 import { v4 as uuidv4 } from "uuid";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createDoc, deleteDoc, getDocsSideBar } from "../api/doc";
+import type { DocItem, DocsSideBarItem } from "../type";
 
-const STORAGE_KEY = "sidebar_order";
-
-// {
-//   items,
-//   selectedId,
-//   onReorder,
-// }: {
-//   items: DocItem[];
-//   selectedId?: string;
-//   onReorder: (newItems: DocItem[]) => void;
-// }
 export default function Sidebar() {
-  const [sideBarItems, setSideBarItems] = useState<DocsSideBarItem[]>([]);
-
-  const [orderedItems, setOrderedItems] = useState<DocsSideBarItem[]>([]);
-  useEffect(() => {
-    const fetchData = async () => {
-      const res = await getDocsSideBar();
-      setSideBarItems(res);
-    };
-    fetchData();
-  }, []);
-  // 初始化：从 localStorage 读取排序结果
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const savedOrder = JSON.parse(saved) as string[];
-        const sorted = [...sideBarItems].sort(
-          (a, b) => savedOrder.indexOf(a.id) - savedOrder.indexOf(b.id)
-        );
-        setOrderedItems(sorted);
-        return;
-      } catch (e) {
-        console.warn("Failed to parse sidebar order, fallback to default", e);
-      }
-    }
-    setOrderedItems(sideBarItems);
-  }, [sideBarItems]);
-
-  // 拖拽完成
-  const handleDragEnd = (result: DropResult) => {
-    if (!result.destination) return;
-
-    const newItems = Array.from(orderedItems);
-    const [moved] = newItems.splice(result.source.index, 1);
-    newItems.splice(result.destination.index, 0, moved);
-
-    setOrderedItems(newItems);
-
-    // 保存顺序
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(newItems.map((i) => i.id))
-    );
-
-    // 通知父组件
-    // onReorder(newItems);
-  };
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  // 列表查询
+  // 将原来的 useEffect 数据请求逻辑 改成 React Query
+  const {
+    data: sideBarItems = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["docsSidebar"],
+    queryFn: getDocsSideBar,
+  });
+
+  // 删掉数据，但页面不更新，是因为 React Query 的缓存还在
+  // 用 useMutation + queryClient.invalidateQueries（或乐观更新 setQueryData）来同步前端列表。
+
+  // 删除：乐观更新 + 失败回滚 + 成功后失效刷新
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteDoc(id),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ["docsSidebar"] });
+      const prev = queryClient.getQueryData<DocsSideBarItem[]>(["docsSidebar"]);
+      // 乐观移除
+      queryClient.setQueryData<DocsSideBarItem[]>(["docsSidebar"], (old) =>
+        (old ?? []).filter((x) => x.id !== id)
+      );
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      // 失败回滚
+      if (ctx?.prev) {
+        queryClient.setQueryData(["docsSidebar"], ctx.prev);
+      }
+    },
+    onSettled: () => {
+      // 最终以服务器为准
+      queryClient.invalidateQueries({ queryKey: ["docsSidebar"] });
+    },
+  });
+
+  //   乐观添加：
+
+  // 用户点击按钮时，前端立即先在列表中添加一条新文档（模拟后端会返回的内容）。
+
+  // 同时后台发送 API 请求。
+
+  // 如果请求成功，保持 UI 不变或替换为后端的真实数据。
+
+  // 如果请求失败，回滚，把之前加上去的假数据移除，并提示错误。
+
+  // 优点：
+
+  // 用户马上看到变化，交互非常流畅。
+
+  // 对于操作简单且成功率高的场景，体验更佳。
+
+  // 新建：成功后失效刷新；也可做乐观添加
+
+  //   失效刷新 = 自动重新请求，让前端缓存和后端数据保持同步。
+  // 它是 React Query 的核心机制之一，也是保证数据一致性的标准做法。
+  const createMutation = useMutation({
+    mutationFn: createDoc,
+    onSuccess: (newDoc: DocItem) => {
+      console.log("创建成功", newDoc);
+      queryClient.invalidateQueries({ queryKey: ["docsSidebar"] });
+      navigate(`/docs/${newDoc.id}`, { replace: true });
+    },
+  });
 
   const handleNewDoc = async () => {
     const newId = uuidv4();
-    await createDoc({
+    await createMutation.mutateAsync({
       id: newId,
       title: "无标题",
       content: "",
       sortIndex: 9999,
     });
-    setOrderedItems((prev) => [
-      { id: newId, title: "无标题", sortIndex: 9999 },
-      ...prev,
-    ]);
-    navigate(`/docs/${newId}`, { replace: true });
   };
 
-  const onDelete = async (id: string) => {
-    const filtered = orderedItems.filter((it) => it.id !== id);
-    setOrderedItems(filtered);
-    await deleteDoc(id);
+  const onDelete = (id: string) => {
+    deleteMutation.mutate(id);
   };
+
+  if (isLoading) return <div className="p-4 text-gray-500">加载中...</div>;
+  if (isError)
+    return (
+      <div className="p-4 text-red-500">
+        加载失败: {(error as Error).message}
+        <button
+          onClick={() => refetch()}
+          className="ml-4 px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition"
+        >
+          重试
+        </button>
+      </div>
+    );
 
   return (
     <aside className="w-60 border-r p-4">
@@ -105,57 +118,37 @@ export default function Sidebar() {
         </button>
       </div>
 
-      <DragDropContext onDragEnd={handleDragEnd}>
-        <Droppable droppableId="sidebar-list">
-          {(provided) => (
-            <ul
-              {...provided.droppableProps}
-              ref={provided.innerRef}
-              className="space-y-1"
+      <ul className="space-y-1">
+        {sideBarItems.map((it) => (
+          <li
+            key={it.id} // ✅ 别忘了 key
+            className="rounded transition flex items-center justify-between"
+          >
+            <NavLink
+              to={`/docs/${it.id}`}
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded hover:bg-gray-100 ${
+                  isActive ? "bg-gray-100 font-medium" : ""
+                }`
+              }
             >
-              {orderedItems.map((it, index) => (
-                <Draggable key={it.id} draggableId={it.id} index={index}>
-                  {(provided, snapshot) => (
-                    <li
-                      ref={provided.innerRef}
-                      {...provided.draggableProps}
-                      {...provided.dragHandleProps}
-                      className={`rounded transition flex items-center justify-between ${
-                        snapshot.isDragging ? "bg-gray-200 shadow-md" : ""
-                      }`}
-                    >
-                      {/* 左侧标题 */}
-                      <NavLink
-                        to={`/docs/${it.id}`}
-                        className={({ isActive }) =>
-                          `block px-3 py-2 rounded hover:bg-gray-100 ${
-                            isActive ? "bg-gray-100 font-medium" : ""
-                          }`
-                        }
-                      >
-                        {it.title}
-                      </NavLink>
+              {it.title}
+            </NavLink>
 
-                      {/* 右侧删除按钮 */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation(); // 阻止事件冒泡，防止触发 NavLink
-                          e.preventDefault(); // 阻止 NavLink 导航
-                          onDelete(it.id); // 调用传入的删除函数
-                        }}
-                        className="ml-2 px-2 py-1 text-sm text-red-500 hover:text-red-700 rounded hover:bg-red-100 transition"
-                      >
-                        删除
-                      </button>
-                    </li>
-                  )}
-                </Draggable>
-              ))}
-              {provided.placeholder}
-            </ul>
-          )}
-        </Droppable>
-      </DragDropContext>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onDelete(it.id);
+              }}
+              className="ml-2 px-2 py-1 text-sm text-red-500 hover:text-red-700 rounded hover:bg-red-100 transition"
+              disabled={deleteMutation.isPending}
+            >
+              删除
+            </button>
+          </li>
+        ))}
+      </ul>
     </aside>
   );
 }
